@@ -4,6 +4,10 @@
 install.packages("raster", "rgdal", "sp")
 install.packages("rgdal")
 install.packages("maps")
+install.packages("RgoogleMaps")
+install.packages("ggmap")
+install.packages("mapview")
+install.packages("mapdata")
 
 #libraries
 library("sf") 
@@ -32,5 +36,15 @@ ggplot() +
   coord_sf()
 
 #playing with maps package
-map('county', 'california', fill = T, col = palette())
+ca_counties <- map('county', 'california', fill = T, col = palette())
+class(ca_counties)
+crs(ca_counties)
 
+#creating test df for lat long
+lat_long <- as_tibble(cocci_location[13:14])
+ll_sf <- st_as_sf(lat_long, coords = c("X", "Y"), crs = 4326)
+mapview(ll_sf) #interactive plot
+
+#plotting with another method
+map("county", "california", fill = T, add = T)
+points(lat_long$X, lat_long$Y, pch = 4, col = "red", cex = 0.8)
