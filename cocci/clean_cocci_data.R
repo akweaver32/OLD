@@ -18,4 +18,17 @@ diagnose <- cocci_location %>%
 
 #creating a limited dataset
 cocci_limited <- cocci_location %>%
-  dplyr::select(-1, -(4:8), -(10:12))
+  dplyr::select(-1, -(3:8), -(10:12))
+
+#rename columns
+names(cocci_limited) <- c("date", "incarcerated", "long", "lat", "age")
+
+#add ID column
+cocci_limited$CID <- paste0(1:nrow(cocci_limited))
+
+#reorder columns to put ID first
+col_order <- c("CID", "date", "lat", "long", "age", "incarcerated")
+cocci_limited <- cocci_limited[, col_order]
+
+#rename cocci-limited to cases (case dataset used in cc_adapt.R)
+cases <- cocci_limited
