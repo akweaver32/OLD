@@ -4,8 +4,9 @@
 install.packages("dlnm")
 install.packages("Epi")
 install.packages("gnm")
+install.packages("googledrive")
 
-library(parallel)
+yeslibrary(parallel)
 library(dplyr)
 library(sf)
 library(raster)
@@ -74,5 +75,6 @@ case_control <- casemat %>%
   arrange(CID)
 
 #get exposure data - what size hexagon do you want to use? need dummy dataset and other datasets for confounders
+drive_find(n_max = 30)
 
-
+drive_download("test_R", type = "csv")

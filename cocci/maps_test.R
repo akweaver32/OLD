@@ -42,9 +42,46 @@ crs(ca_counties)
 
 #creating test df for lat long
 lat_long <- as_tibble(cocci_location[13:14])
-ll_sf <- st_as_sf(lat_long, coords = c("X", "Y"), crs = 4326)
+colnames(lat_long) <- c("long", "lat")
+ll_sf <- st_as_sf(lat_long, coords = c("lat", "long"), crs = 4326)
 mapview(ll_sf) #interactive plot
+View(lat_long)
+
+#write a function to convert lat long to ca counties
+ll_to_county <- function(ll_df, 
+                         map, 
+                         name_col = "name") {
+  ## Convert points data.frame to an sf POINTS object
+  pts <- st_as_sf(ll_df, coords = c("long", "lat"), crs = 4326)
+  
+  ## Transform spatial data to some planar coordinate system
+  ## (e.g. Web Mercator) as required for geometric operations
+  county <- st_transform(map, crs = 3857)
+  pts <- st_transform(pts, crs = 3857)
+  
+  ## Find names of county (if any) intersected by each point
+  county_names <- county[[name_col]]
+  ii <- as.integer(st_intersects(pts, county))
+  county_names[ii]
+  return(cbind(ll_df, county_names[ii]))
+}
+
+#debug function, works
+cocci_counties <- ll_to_county(cocci_limited, CA_counties_aoi, "NAME") %>%   #creates a df with counties and coords
+  rename("county" = "county_names[ii]")
+  
+ll_to_county(tiny_ll, CA_counties_aoi, "NAME")
+tiny_ll <- lat_long[125,]
+
+
+#create a df with coords and county
+ll_county <- data.frame(lat_long, cocci_counties) %>%
+  mutate(cocci_counties = as.factor(cocci_counties)) %>%
+  rename("lat" = "Y", "long" = "X")
+str(ll_county)
 
 #plotting with another method
 map("county", "california", fill = T, add = T)
 points(lat_long$X, lat_long$Y, pch = 4, col = "red", cex = 0.8)
+
+cocci_limited[3:4]
