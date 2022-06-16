@@ -23,7 +23,7 @@ split_GEOID <- read_csv("GEOIDS_in_Divided_Counties.csv") %>%
 corrected_GEOID <- c(split_GEOID$GEOID, "6029005508", "6079012302", "6053011101", "6019008402", "6077004902", "6029006100", "6029000101", "6029004301", "6107003100", "6107000900", "6077003803")
 
 #read in California census tracts
-CT <- readOGR("shapefiles/ca_census_tract/CDPH_ct", "cb_2017_06_tract_500k")
+CT <- readOGR("shapefiles/Census Tracts")
 
 #assign correct spatial information
 proj4string(CT) <- CRS('+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0')

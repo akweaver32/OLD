@@ -5,7 +5,8 @@
 #libraries and set up
 packages_models <- c("tidyverse", "dlnm", "splines", "data.table", "sandwich", 
                      "miceadds", "tsModel", "lubridate", "splines", "glmmTMB", 
-                     "bbmle", "stargazer", "sjPlot", "DHARMa", "broom.mixed", "dotwhisker", "sf", "lme4", "glmmTMB")
+                     "bbmle", "stargazer", "sjPlot", "DHARMa", "broom.mixed", "dotwhisker", "sf", "lme4", "glmmTMB", "dotwhisker",
+                     "mixmeta")
 lapply(packages_models, library, character.only = TRUE)
 
 endemic_counties <- c("Kern", "Fresno", "Tulare", "San Luis Obispo", "Ventura", "Kings", "Monterey", 
@@ -14,13 +15,6 @@ endemic_counties <- c("Kern", "Fresno", "Tulare", "San Luis Obispo", "Ventura", 
 endemic_counties_X <- c("WKern", "EKern", "WFresno", "WTulare", "San Luis Obispo", "Ventura", "Kings", "Monterey", 
                         "San Joaquin", "NLA", "Merced", "Stanislaus", "Santa Barbara", "WMadera")
 
-#read in base dust data and counties split
-CDE_data <- read_csv("base_dust_data_CLEAN_FINAL.csv") %>%
-  left_join(select(CT_sf, -area_km), by = "GEOID") %>% #fix the geometry back again
-  select(-geometry.x) %>%
-  rename("geometry" = "geometry.y") %>%
-  arrange(pop_dense) %>% #create the population density percentiles
-  mutate(pop_tile = ntile(pop_dense, 50))
 
 #split counties read in for mapping
 counties_split <- read_sf("shapefiles/split_counties") %>%
@@ -30,6 +24,18 @@ counties_split <- read_sf("shapefiles/split_counties") %>%
 split_GEOID <- read_csv("GEOIDS_in_Divided_Counties.csv") %>%
   dplyr::filter(county1 %in% endemic_counties_X) %>% #just the split counties
   mutate(GEOID = substring(GEOID, 2), GEOID = as.numeric(GEOID))
+
+#read in base dust data and counties split
+CDE_data <- read_csv("base_dust_data_CLEAN_FINAL.csv") %>%
+  left_join(dplyr::select(CT_sf, -area_km), by = "GEOID") %>% #fix the geometry back again
+  dplyr::select(-geometry.x) %>%
+  rename("geometry" = "geometry.y") %>%
+  arrange(pop_dense) %>% #create the population density percentiles
+  mutate(pop_tile = ntile(pop_dense, 50)) %>%
+  left_join(dplyr::select(split_GEOID, - ...1), by = "GEOID") %>% #join with the split counties
+  rename("split_county" = "county1")
+
+
 
 # urbanicity plots --------------------------------------------------------
 #drop by percentile of urbanicity (some census tracts are missing?)
@@ -59,9 +65,9 @@ CDE_data %>%
 #actual dropping (bottom 40%)
 no_urban <- CDE_data %>%
   filter(pop_tile < 20) %>% #bottom 40% of census tract density
-  select(-pop_tile) %>%
-  left_join(select(split_GEOID, - ...1), by = "GEOID") %>% #join with the split counties
-  rename("split_county" = "county1")
+  select(-pop_tile)
+
+saveRDS(no_urban, "no_urban.rds")
 
 # data shape --------------------------------------------------------------
 
@@ -74,17 +80,19 @@ hist(no_urban$pop_dense) #still skewed
 
 # basic visualization -----------------------------------------------------
 
-#mean annual cases what census tracts have the highest burden? doesn't look overly patchy
+#annual cases what census tracts have the highest burden? doesn't look overly patchy
 CDE_data %>%
   dplyr::group_by(GEOID, OnsetYear) %>%
-  dplyr::summarise(annual_cases = sum(N_all)) %>%
-  dplyr::group_by(GEOID) %>%
-  dplyr::summarise(mean = mean(annual_cases)) %>%
+  dplyr::summarise(annual_cases = sum(N_all), 
+                   annual_pop = mean(TotalPopulation),
+                   Incidence = (annual_cases/annual_pop)*100000) %>%
   left_join(CT_sf, by = "GEOID") %>%
-  ggplot(mapping = aes(geometry = geometry, fill = log(mean))) +
+  ggplot(mapping = aes(geometry = geometry, fill = log(Incidence))) +
   geom_sf(size = 0.05) +
   coord_sf(crs = 3488) +
-  scale_fill_viridis_c()
+  scale_fill_viridis_c() +
+  facet_wrap(~OnsetYear) +
+  ggtitle("Log Incidence per 100,000")
 
 # explore spline for seasonality ------------------------------------------
 
@@ -120,7 +128,7 @@ CDE_data %>%
   dplyr::summarise(case_count = sum(N_all, na.rm = TRUE)) %>%
   ggplot(aes(x = time, y = case_count)) +
   geom_point() +
-  geom_smooth(method = "lm", formula = y ~ splines::ns(x, 2*18), se = FALSE, col = "red") +
+  geom_smooth(method = "lm", formula = y ~ splines::ns(x, 3*18), se = FALSE, col = "red") +
   geom_smooth(method = "lm", se = FALSE, formula = y ~ splines::ns(x, 2), col = "blue") +
   facet_wrap(~county, scales = "free_y") +
   ylab("Monthly Case Count") +
@@ -132,7 +140,7 @@ no_urban %>%
   dplyr::summarise(case_count = sum(N_all, na.rm = TRUE)) %>%
   ggplot(aes(x = time, y = case_count)) +
   geom_point() +
-  geom_smooth(method = "lm", formula = y ~ splines::ns(x, 2*18), se = FALSE, col = "red") +
+  geom_smooth(method = "lm", formula = y ~ splines::ns(x, 3*18), se = FALSE, col = "red") +
   geom_smooth(method = "lm", se = FALSE, formula = y ~ splines::ns(x, 2), col = "blue") +
   facet_wrap(~county, scales = "free_y") +
   ylab("Monthly Case Count") +
@@ -155,7 +163,7 @@ m_23 <- update(m_2, ~ . + scale(dust_lag3))
 m_234 <- update(m_23, ~ . + scale(dust_lag4))
 
 #with full dataset
-m_2F <- update(m_2, ~ . , data = CDE_data) #didn't converge
+m_2F <- update(m_2, ~ . , data = CDE_data) 
 m_23F <- update(m_23, ~ . , data = CDE_data)
 m_234F <- update(m_234, ~ . , data = CDE_data)
 
@@ -171,7 +179,7 @@ neg_controls <- no_urban %>%
 
 #run models with future dust as the main exposure 
 NC_1 <- glmmTMB(N_all ~ offset(log(TotalPopulation+1)) +
-                  scale(dust_lead1) +
+                  scale(dust_lag1) + scale(dust_lag2) +
                   ns(time, knots = 3*18) +
                   ns(lat) + ns(long) +
                   (1|split_county),
@@ -181,8 +189,31 @@ NC_1 <- glmmTMB(N_all ~ offset(log(TotalPopulation+1)) +
 NC_23 <- update(NC_2, ~ . + scale(dust_lag3))
 NC_234 <- upadate(NC_23, ~ . + scale(dust_lag4))
 
-NC_1c <- update(NC_1, ~ . + scale(PercentBlack) + scale(PercentFilipino) + scale(PercentHispanic))
+#when current dust is main exposure
+NC_lead <- glmmTMB(N_all ~ offset(log(TotalPopulation+1)) +
+                     scale(dust_mean) + scale(dust_lead1) +
+                     ns(time, knots = 3*18) +
+                     ns(lat) + ns(long) +
+                     (1|split_county),
+                   family = "nbinom2",
+                   data = neg_controls)
 
+NC_lead234 <- glmmTMB(N_all ~ offset(log(TotalPopulation+1)) +
+                 scale(dust_lead1) + scale(dust_lag2) + scale(dust_lag3) + scale(dust_lag4) +
+                 ns(time, knots = 3*18) +
+                 ns(lat) + ns(long) +
+                 (1|split_county),
+               family = "nbinom2",
+               data = neg_controls)
+
+#with confounding variables you thought of 
+NC_1race <- update(NC_lead234, ~ . + scale(PercentBlack) + scale(PercentFilipino) + scale(PercentHispanic))
+NC_1winter <- update(NC_lead234, ~ . + scale(winter_total))
+NC_1climate <- update(NC_lead234, ~ . + scale(winter_total) + scale(summer_mean))
+NC_1CR <- update(NC_lead234, ~ . + scale(PercentBlack) + scale(PercentFilipino) + scale(PercentHispanic) + scale(winter_total) + scale(summer_mean))
+
+#diagnosis
+diagnose(NC_1CR)
 
 # other main effect characterizations -------------------------------------
 #starting with dust lag 1 (doesn't converge)
@@ -236,36 +267,27 @@ m_cum_34_R <- glmmTMB(N_all ~ offset(log(TotalPopulation+1)) +
 #plot the RE structure
 plot_model(m_cum_34, type = "re", title = "Random Effects Estimates - Cumulative Exposure Model")
 
-# model comparisons -------------------------------------------------------
-
-#compare models
-AICtab(m_cum, m_cum_3, m_cum_34, m_2, m_23, m_234, m_1, m_12, m_123, m_1234, base = TRUE)
-AICtab(m_cumF, m_cum_3F, m_cum_34F, m_2F, m_23F, m_234F, m_1F, m_12F, m_123F,  m_1234F, base = TRUE)
-
-#visualize the model coefficients
-plot_model(m_cum_34, type = "est", terms = c("cum_12", "dust_lag3", "dust_lag4"))
+# model comparisons & zero inflation  -------------------------------------------------------
 
 #create nice table for slides (m cumulative and 1234 and 234)
 tab_model(m_cum_34, m_1234, m_234, file = "results.htm", p.style = "stars")
 tab_model(m_cum_34F, m_1234F, m_234F, file = "results_FD.htm", p.style = "stars")
 
-#with zero inflated based on GEOID
-model_mixed_ZI <- glmmTMB(N_all ~ offset(log(TotalPopulation+1)) + 
-                            scale(cum_12) + #exposure of interest
-                            ns(time, knots=3*18) +  # splines for time, allow these effects to be non-linear
-                            ns(lat) + ns(long) +
-                            (1|county), # random effect for county location
-                          zi = ~GEOID, #zero inflation based on GEOID
-                          family = "poisson",
-                          data = no_urban)
+test <- dust_DLNM %>%
+  group_by(GEOID) %>%
+  
 
-#use DHARMa to look at residuals (maybe okay)
-simulationOutput <- simulateResiduals(fittedModel = m_cum_34, plot = F)
-plot(simulationOutput)
-testOutliers(type = "bootstrap", simulationOutput = simulationOutput)
-testDispersion(simulationOutput)
-testZeroInflation(simulationOutput)
+#zero inflation
+mZINB <- zeroinfl(N_all ~ dust_basis + ns(time, 3*18) + ns(lat) + ns(long) | summer_mean, 
+                  data = dust_DLNM, dist = "negbin",  offset = log(TotalPopulation))
 
+m_hurdle_NB <- hurdle(N_all ~ dust_basis + ns(time, 3*18) + ns(lat) + ns(long) | winter_total, 
+                      data = dust_DLNM, dist = "negbin",  offset = log(TotalPopulation))
+
+AIC(mZINB)
+rootogram(mZINB, max = 70)
+
+soil_moisture <- readRDS("extracted data/environmental data/Monthly Soil Moisure Means, 1997-2018.rds")
 
 # interaction modeling and visualization ----------------------------------
 #with interactions for season
@@ -410,20 +432,28 @@ ggplot() +
 
 # plotting models ---------------------------------------------------
 
-#interaction plots
-mylist <- list(dust_lag2 = seq(0,4,by=0.5), dust_season = c("Summer","Spring", "Fall", "Winter"))
-emmip(model5, dust_season ~ dust_lag2, at=mylist, CIs=TRUE, xlab = "Dust lagged 2 months", type = "response")
-
 #coefficient plots
+#no urban data
 m_cum_34_tidy <- broom.mixed::tidy(m_cum_34, exponentiate = TRUE)
 m_1234_tidy <- broom.mixed::tidy(m_1234, exponentiate = TRUE)
 m_234_tidy <- broom.mixed::tidy(m_234, exponentiate = TRUE)
-
+#full dataset
 m_cum_34F_tidy <- broom.mixed::tidy(m_cum_34F, exponentiate = TRUE)
 m_1234F_tidy <- broom.mixed::tidy(m_1234F, exponentiate = TRUE)
 m_234F_tidy <- broom.mixed::tidy(m_234F, exponentiate = TRUE)
+#negative controls (lag 1 and 2)
+m_0_tidy <- broom.mixed::tidy(m_0, exponentiate = TRUE)
+m_2_tidy <- broom.mixed::tidy(m_2, exponentiate = TRUE)
+m_234_tidy <- broom.mixed::tidy(m_234, exponentiate = TRUE)
+NC_1_tidy <- broom.mixed::tidy(NC_1, exponentiate = TRUE)
+NC_lead_tidy <- broom.mixed::tidy(NC_lead, exponentiate = TRUE)
+NC_lead234_tidy <- broom.mixed::tidy(NC_lead234, exponentiate = TRUE)
+NCrace_tidy <- broom.mixed::tidy(NC_1race, exponentiate = TRUE)
+NCwinter_tidy <- broom.mixed::tidy(NC_1winter, exponentiate = TRUE)
+NCclimate_tidy <- broom.mixed::tidy(NC_1climate, exponentiate = TRUE)
+NC_CR_tidy <- broom.mixed::tidy(NC_1CR, exponentiate = TRUE)
 
-  
+#create df of all tidy models
 tidy_models_NU <- rbind(m_cum_34_tidy, m_1234_tidy, m_234_tidy) %>%
   mutate(model = rep(c("Cumulative Model", "Dust Lag 1 Model", "Dust Lag 2 Model"), 
                      times = c(9, 10, 9)))
@@ -432,7 +462,43 @@ tidy_models_F <- rbind(m_cum_34F_tidy, m_1234F_tidy, m_234F_tidy) %>%
   mutate(model = rep(c("Cumulative Model", "Dust Lag 1 Model", "Dust Lag 2 Model"), 
                      times = c(9, 10, 9)))
 
+tidy_models_NC <- rbind(m_234_tidy, NC_lead234_tidy, NCrace_tidy, NCwinter_tidy, NCclimate_tidy, NC_CR_tidy) %>%
+  mutate(model = rep(c("Base Model", "Negative Control Model", "NCM + race", "NCM + winter rain", "NCM + summer and winter", "NCM + climate and race"),
+                     times = c(9, 10, 13, 11, 12, 15)))
+
 #create dot whisker plot
+
+#for negative controls
+dwplot(tidy_models_NC, 
+       vline = geom_vline(
+         xintercept = 1,
+         colour = "grey60",
+         linetype = 2),
+       dot_args = list(size = 2),
+       whisker_args = list(size = 1),
+       vars_order = c( "scale(dust_lead1)", "scale(dust_lag2)", "scale(dust_lag3)", "scale(dust_lag4)"),
+       model_order = c("Base Model", "Negative Control Model", "NCM + race", "NCM + winter rain", "NCM + summer and winter", "NCM + climate and race"),
+       ci_method = "wald") %>%
+  relabel_predictors(c(
+    `scale(dust_lead1)` = "Dust Lead 1 Month (future)",
+    `scale(dust_lag1)` = "Dust Lagged 1 Month",
+    `scale(dust_lag2)` = "Dust Lagged 2 Months",
+    `scale(dust_lag3)` = "Dust Lagged 3 Months",
+    `scale(dust_lag4)` = "Dust Lagged 4 Months")) +
+  theme_bw() +
+  theme(
+    legend.position = c(0.007, 0.3),
+    legend.justification = c(0, 0),
+    legend.background = element_rect(colour = "grey80"),
+    legend.title.align = .5
+  ) +
+  xlab("IRR Estimate and 95% CI") + 
+  ylab("") +
+  scale_x_continuous(breaks = seq(-1, 2.5, by = 0.05)) +
+  theme(legend.title = element_blank()) +
+  ggtitle("Negative Control Model Coefficients")
+
+#for general models
 dwplot(tidy_models_NU,
        vline = geom_vline(
          xintercept = 1,
@@ -459,23 +525,6 @@ dwplot(tidy_models_NU,
   scale_x_continuous(breaks = seq(-1, 2.5, by = 0.05)) +
   theme(legend.title = element_blank()) +
   ggtitle("Negative Binomial Model Coefficients")
-
-#look at predictions
-data10$predsm <- predict(modelsm, type = "response")
-
-model_predict3 <- no_urban %>%
-  dplyr::filter_at(vars(dust_lag2), all_vars(!is.na(.))) 
-
-model_predict3$pred <- predict(model3, type = "response")
-
-#create prediction plot
-model_predict3 %>%
-  group_by(GEOID, time) %>%
-  summarize(total_pred = sum(pred), total_out = sum(N_all)) %>%
-  ggplot() +
-  geom_point(aes(x = time, y = total_out)) +
-  geom_point(aes(x = time, y = total_pred), color = "red") +
-  facet_wrap(~GEOID, scales = "free_y")
 
 # look at spatial autocorrelation -----------------------------------------
 
@@ -588,33 +637,30 @@ df.res[which.min(abs(df.res$x-1.3)),][1:3]
 #create the cross basis terms 
 dust_DLNM <- no_urban %>%
   group_by(GEOID) %>%
-  arrange(time) %>%
-  as.data.frame()
+  arrange(time, .by_group = TRUE) 
 
-dust_basis <- dlnm::crossbasis(dust_DLNM$dust_mean, lag = 6,
-                         argvar=list(fun = "lin"),
+#knot options
+c(0.11,0.59,1.47) #preferred
+c(0.31, 0.95) #but minimized Q-AIC
+
+dust_basis <- dlnm::crossbasis(dust_DLNM$dust_mean, lag = 5,
+                         argvar=list(fun = "bs", knots = c(0.11,0.59,1.47)),
                          arglag=list(fun="poly", degree = 3),
                          group = dust_DLNM$GEOID)
 
-#does this need to have an adjustment for year too? model doesn't converge if so
-model_basis <- glmer.nb(N_all ~ offset(log(TotalPopulation+1)) + 
-                          dust_basis  + #exposure of interest
-                          ns(time, knots=3*18) +  # splines for time, allow these effects to be non-linear
-                          (1|county) + # random effect for county location
-                          ns(lat) + ns(long),
-                        data = dust_DLNM)
-
-summary(model_basis)
-
-pred_basis <- crosspred(dust_basis, model_basis, cen = 0.5)
+#create the prediction
+pred_basis <- crosspred(dust_basis, mZINB, cen = 0.3, bylag = 0.2, model.link = "log")
 
 #IRR for a 1 mg/m3 increase in dust exposure 
-plot(pred_basis, "slices", var = 1, col=3, ylab="IRR", ci.arg=list(density=15,lwd=3), 
-     main="Lag-response curve for a 1-unit increase in dust (IQR) w/ spline month, 80th pop dense")
+plot(pred_basis, "slices", var = 1.3, col=2, ylab="IRR", ci.arg=list(density=15,lwd=3), 
+     main="Lag-response curve for a 1-unit increase (0.3 to 1.3 ug/m^3)")
 
-plot(pred_basis, "slices", var=1, ci="bars", ylab="IRR", type="p", col=2, pch=19,
-     ci.level=0.95, main="Lag-response a 1-unit increase (95CI)")
+plot(pred_basis, "slices", var = c(1.5, 2.5, 3.5), lag = c(1,2, 3), col = 4, ci.arg = list(density = 40, col = grey(0.7)), ylim = c(0, 1.7))
+#contour plot
+plot(pred_basis, "contour", xlab = "Dust Concentration", key.title = title("IRR"), 
+     plot.title = title("Contour Plot", xlab = "Dust Concentration", ylab = "Lag"))
 
-#look at residuals
-plot(model_basis)
+rm(complete)
+
+
 
